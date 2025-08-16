@@ -23,11 +23,9 @@ import numpy as np
 import pandas as pd
 from typing import Literal, Optional, List, Union
 from sklearn.isotonic import IsotonicRegression
-from sklearn.metrics import brier_score_loss, log_loss, precision_score, recall_score, f1_score
+from sklearn.metrics import brier_score_loss, log_loss
 import matplotlib.pyplot as plt
 from copy import deepcopy
-
-from uqlm.utils import load_example_dataset, Tuner
 
 
 class ScoreCalibrator:
@@ -92,7 +90,7 @@ class ScoreCalibrator:
 
             self.calibrator_ = _SigmoidCalibration()
         elif self.method == "isotonic":
-            self.calibrator_ = IsotonicRegression(out_of_bounds="raise")
+            self.calibrator_ = IsotonicRegression(out_of_bounds="clip")
         else:
             raise ValueError(f"Unknown method: {self.method}")
 
@@ -204,21 +202,31 @@ class ScoreCalibrator:
         metrics = {"brier_score": brier, "log_loss": logloss, "ece": ece, "mce": mce}
 
         if plot:
-            self._plot_reliability_diagram(bin_confidences, bin_accuracies, bin_counts, n_bins)
+            self._plot_reliability_diagram(bin_confidences, bin_accuracies, bin_counts, bin_boundaries)
 
         return metrics
 
-    def _plot_reliability_diagram(self, bin_confidences: list, bin_accuracies: list, bin_counts: list, n_bins: int):
+    def _plot_reliability_diagram(self, bin_confidences: list, bin_accuracies: list, bin_counts: list, bin_boundaries: np.ndarray):
         """Plot reliability diagram for calibration assessment."""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
+        n_bins = len(bin_boundaries) - 1
+
+        # Create bin boundary labels
+        bin_labels = [f"({bin_boundaries[i]:.1f}, {bin_boundaries[i + 1]:.1f}]" for i in range(n_bins)]
+
+        # Calculate bin midpoints for perfect calibration line
+        bin_midpoints = [(bin_boundaries[i] + bin_boundaries[i + 1]) / 2 for i in range(n_bins)]
+
         # Reliability diagram
-        ax1.plot([0, 1], [0, 1], "k--", label="Perfect calibration")
+        # Perfect calibration line: where confidence = accuracy for each bin
+        ax1.plot(range(n_bins), bin_midpoints, "k--", label="Perfect calibration")
         ax1.bar(range(n_bins), bin_accuracies, alpha=0.7, label="Actual accuracy", width=0.8)
-        ax1.plot(range(n_bins), bin_confidences, "ro-", label="Average confidence")
         ax1.set_xlabel("Confidence bin")
-        ax1.set_ylabel("Accuracy / Confidence")
+        ax1.set_ylabel("Accuracy")
         ax1.set_title("Reliability Diagram")
+        ax1.set_xticks(range(n_bins))
+        ax1.set_xticklabels(bin_labels, rotation=45, ha="right")
         ax1.legend()
         ax1.grid(True, alpha=0.3)
 
@@ -227,6 +235,8 @@ class ScoreCalibrator:
         ax2.set_xlabel("Confidence bin")
         ax2.set_ylabel("Number of samples")
         ax2.set_title("Sample Distribution")
+        ax2.set_xticks(range(n_bins))
+        ax2.set_xticklabels(bin_labels, rotation=45, ha="right")
         ax2.grid(True, alpha=0.3)
 
         plt.tight_layout()
@@ -343,136 +353,3 @@ def calibrate_uq_results(uq_results, correct_indicators: Union[List[int], np.nda
         calibrators[scorer] = calibrator
 
     return calibrated_results, calibrators
-
-
-def main():
-    """Main function to run the calibration demo."""
-
-    # 1. Set up LLM and Prompts
-    print("🔧 Setting up LLM and loading data...")
-
-    # Load example dataset (gsm8k)
-    gsm8k = load_example_dataset("gsm8k", n=200)
-    print(f"Loaded {len(gsm8k)} questions from GSM8K dataset")
-
-    # Define prompts
-    MATH_INSTRUCTION = "When you solve this math problem only return the answer with no additional text.\n"
-    prompts = [MATH_INSTRUCTION + prompt for prompt in gsm8k.question]
-
-    # Convert results to DataFrame (simulated for demo)
-    # result_df = results.to_df()
-
-    # For demo purposes, let's create simulated data with boolean labels
-    np.random.seed(42)
-    n_samples = len(prompts)
-
-    result_df = pd.DataFrame(
-        {
-            "prompt": prompts,
-            "response": [f"Response {i}" for i in range(n_samples)],
-            "normalized_probability": np.random.beta(2, 2, n_samples),
-            "min_probability": np.random.beta(1.5, 3, n_samples),
-            "answer": gsm8k.answer,
-            "response_correct": np.random.choice([True, False], n_samples, p=[0.7, 0.3]),  # Boolean labels
-        }
-    )
-
-    print(f"Generated {len(result_df)} responses with confidence scores")
-    print(f"Baseline LLM accuracy: {np.mean(result_df['response_correct']):.3f}")
-
-    # 3. Score Calibration Analysis
-    print("\n🎯 Starting Score Calibration Analysis...")
-
-    # Split data for training/testing calibration
-    split_idx = len(result_df) // 2
-    train_df = result_df.iloc[:split_idx]
-    test_df = result_df.iloc[split_idx:]
-
-    print(f"Split data: {len(train_df)} training, {len(test_df)} testing samples")
-
-    # 3.1 Compare Calibration Methods - simplified call
-    print("\n📊 Comparing calibration methods...")
-
-    scorers = ["normalized_probability", "min_probability"]
-
-    for scorer in scorers:
-        print(f"\n=== Calibration Comparison for {scorer} ===")
-        comparison = compare_calibration_methods(
-            scores=train_df[scorer],
-            correct_labels=train_df["response_correct"],  # Direct boolean/binary labels
-            test_scores=test_df[scorer],
-            test_correct_labels=test_df["response_correct"],
-        )
-        print(comparison.round(4))
-
-    # 3.2 Apply Calibration to Results
-    print("\n🔧 Applying calibration to confidence scores...")
-
-    calibrators = {}
-    calibrated_scores = {}
-
-    for scorer in scorers:
-        # Train calibrator on training set
-        calibrator = ScoreCalibrator(method="platt")
-        calibrator.fit(train_df[scorer], train_df["response_correct"])
-        calibrators[scorer] = calibrator
-
-        # Apply to test set
-        calibrated_scores[f"{scorer}_calibrated"] = calibrator.transform(test_df[scorer])
-
-        print(f"Calibrated {scorer} scores")
-
-    # Add calibrated scores to test dataframe
-    for key, values in calibrated_scores.items():
-        test_df = test_df.copy()
-        test_df[key] = values
-
-    # 3.3 Evaluate Calibration Quality
-    print("\n📈 Evaluating calibration quality...")
-
-    for scorer in scorers:
-        print(f"\n=== Calibration Evaluation for {scorer} ===")
-
-        # Original scores
-        print("Before calibration:")
-        calibrator = ScoreCalibrator()
-        original_metrics = calibrator.evaluate_calibration(test_df[scorer], test_df["response_correct"], plot=True)
-
-        # Calibrated scores
-        print("\nAfter calibration:")
-        calibrated_metrics = calibrator.evaluate_calibration(test_df[f"{scorer}_calibrated"], test_df["response_correct"], plot=True)
-
-        print(f"ECE improvement: {original_metrics['ece']:.4f} → {calibrated_metrics['ece']:.4f}")
-        print(f"Brier score improvement: {original_metrics['brier_score']:.4f} → {calibrated_metrics['brier_score']:.4f}")
-
-    # 3.4 Hallucination Detection Performance with Calibrated Scores
-    print("\n🎯 Evaluating hallucination detection with calibrated scores...")
-
-    # Evaluate both original and calibrated scores
-    all_scorers = scorers + [f"{s}_calibrated" for s in scorers]
-
-    t = Tuner()
-    correct_indicators = test_df["response_correct"].values
-
-    results_comparison = []
-
-    for scorer in all_scorers:
-        y_scores = test_df[scorer].values
-
-        # Find optimal threshold
-        best_threshold = t.tune_threshold(y_scores=y_scores, correct_indicators=correct_indicators, thresh_objective="fbeta_score")
-
-        # Make predictions
-        y_pred = (y_scores > best_threshold).astype(int)
-
-        # Calculate metrics
-        precision = precision_score(y_true=correct_indicators, y_pred=y_pred)
-        recall = recall_score(y_true=correct_indicators, y_pred=y_pred)
-        f1 = f1_score(y_true=correct_indicators, y_pred=y_pred)
-
-        results_comparison.append({"scorer": scorer, "threshold": best_threshold, "precision": precision, "recall": recall, "f1_score": f1})
-
-
-if __name__ == "__main__":
-    main()
-    print("\n🎉 Calibration demo completed successfully!")

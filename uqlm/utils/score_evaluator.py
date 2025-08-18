@@ -1,6 +1,5 @@
 from typing import List, Union
 
-
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import brier_score_loss, log_loss
@@ -15,7 +14,7 @@ class ScoreEvaluator:
     """
 
     @staticmethod
-    def evaluate_calibration(scores: "Union[List[float], np.ndarray]", correct_indicators: "Union[List[int], np.ndarray]", n_bins: int = 10, plot: bool = True, axes: "Union[tuple, None]" = None) -> dict:
+    def evaluate_calibration(scores: Union[List[float], np.ndarray], correct_indicators: "Union[List[int], np.ndarray]", n_bins: int = 10, plot: bool = True, axes: "Union[tuple, None]" = None) -> dict:
         """
         Evaluate the calibration quality of scores.
 

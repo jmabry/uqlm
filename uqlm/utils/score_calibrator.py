@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 from typing import Literal, Optional, List, Union
 from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
@@ -87,16 +88,17 @@ class ScoreCalibrator:
             raise ValueError("scores must be between 0 and 1 inclusive")
 
         if self.method == "platt":
-            from sklearn.calibration import _SigmoidCalibration
-
-            self.calibrator_ = _SigmoidCalibration()
+            # Reshape scores to 2D array for LogisticRegression
+            scores_2d = scores.reshape(-1, 1)
+            self.calibrator_ = LogisticRegression()
+            self.calibrator_.fit(scores_2d, correct_labels)
         elif self.method == "isotonic":
             self.calibrator_ = IsotonicRegression(out_of_bounds="clip")
+            self.calibrator_.fit(scores, correct_labels)
         else:
             raise ValueError(f"Unknown method: {self.method}")
 
         # Fit the calibrator directly on scores and labels
-        self.calibrator_.fit(scores, correct_labels)
         self.is_fitted_ = True
         return self
 
@@ -118,7 +120,16 @@ class ScoreCalibrator:
             raise ValueError("Calibrator must be fitted before transform")
 
         scores = np.array(scores)
-        return self.calibrator_.predict(scores)
+
+        if self.method == "platt":
+            # LogisticRegression needs 2D input and returns probabilities for class 1
+            scores_2d = scores.reshape(-1, 1)
+            return self.calibrator_.predict_proba(scores_2d)[:, 1]
+        elif self.method == "isotonic":
+            # IsotonicRegression can handle 1D arrays
+            return self.calibrator_.predict(scores)
+        else:
+            raise ValueError(f"Unknown method: {self.method}")
 
     def fit_transform(self, scores: Union[List[float], np.ndarray], correct_labels: Union[List[bool], List[int], np.ndarray]) -> np.ndarray:
         """

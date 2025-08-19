@@ -55,7 +55,19 @@ class ScoreEvaluator:
 
         # Calculate Brier score and log loss
         brier = brier_score_loss(correct_indicators, scores)
-        logloss = log_loss(correct_indicators, scores)
+
+        # Handle edge case where all labels are the same (log_loss requires at least 2 classes)
+        if len(np.unique(correct_indicators)) == 1:
+            # For single class, log loss is not well-defined, so we calculate it manually
+            # Log loss = -1/N * sum(y_i * log(p_i) + (1-y_i) * log(1-p_i))
+            eps = 1e-15  # Small epsilon to avoid log(0)
+            scores_clipped = np.clip(scores, eps, 1 - eps)
+            if correct_indicators[0] == 1:  # All correct
+                logloss = -np.mean(np.log(scores_clipped))
+            else:  # All incorrect
+                logloss = -np.mean(np.log(1 - scores_clipped))
+        else:
+            logloss = log_loss(correct_indicators, scores)
 
         # Calculate Expected Calibration Error (ECE) and Maximum Calibration Error (MCE)
 

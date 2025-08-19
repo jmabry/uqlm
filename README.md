@@ -223,6 +223,30 @@ Explore the following demo notebooks to see how to use UQLM for various hallucin
 - [Off-the-Shelf UQ Ensemble](https://github.com/cvs-health/uqlm/blob/develop/examples/ensemble_off_the_shelf_demo.ipynb): A notebook demonstrating hallucination detection using BS Detector ([Chen & Mueller, 2023](https://arxiv.org/abs/2308.16175)) off-the-shelf ensemble.
 - [Semantic Entropy](https://github.com/cvs-health/uqlm/blob/develop/examples/semantic_entropy_demo.ipynb): A notebook demonstrating token-probability-based semantic entropy ([Farquhar et al., 2024](https://www.nature.com/articles/s41586-024-07421-0); [Kuhn et al., 2023](https://arxiv.org/abs/2302.09664)), which combines elements of black-box UQ and white-box UQ to compute confidence scores.
 
+## Score Calibration
+
+Raw confidence scores from uncertainty quantification methods may not be well-calibrated probabilities. UQLM provides the `ScoreCalibrator` class to transform these scores into calibrated probabilities that better reflect the true likelihood of correctness.
+
+**Example Usage:**
+
+```python
+import numpy as np
+from uqlm.utils.score_calibrator import ScoreCalibrator
+
+# Example confidence scores and correctness labels
+scores = [0.3, 0.7, 0.9, 0.2, 0.8, 0.5, 0.95, 0.1, 0.6, 0.85]
+correct_labels = [0, 1, 1, 0, 1, 0, 1, 0, 1, 1]
+
+calibrator = ScoreCalibrator(method="platt")
+calibrator.fit(scores, correct_labels)
+
+# Calibrate new test scores
+test_scores = [0.4, 0.6, 0.8]
+calibrated = calibrator.transform(test_scores)
+```
+
+Explore the following notebook to see how to calibrate UQLM scores when ground-truth labels are available.
+- [Confidence Score Calibration](https://github.com/cvs-health/uqlm/blob/develop/examples/calibration_demo.ipynb): A notebook demonstrating how to transform raw confidence scores into well-calibrated probabilities using Platt scaling and isotonic regression, with reliability diagrams and calibration metrics.
 
 ## Associated Research
 A technical description of the `uqlm` scorers and extensive experiment results are contained in this **[this paper](https://arxiv.org/abs/2504.19254)**. If you use our framework or toolkit, we would appreciate citations to the following paper:
